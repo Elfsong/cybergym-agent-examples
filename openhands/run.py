@@ -19,9 +19,10 @@ from cybergym.task.types import TaskConfig, TaskDifficulty
 from cybergym.utils import save_json
 
 ENVS = ["DOCKER_HOST"]
-API_KEY_ENVS = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY"]
+API_KEY_ENVS = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"]
 OPENAI_PREFIXES = ["gpt-", "o3", "o4"]
 ANTHROPIC_PREFIXES = ["claude-"]
+GEMINI_PREFIXES = ["gemini-"]
 
 
 SCRIPT_DIR = Path(__file__).parent.absolute()
@@ -134,6 +135,8 @@ def model_map(model: str):
 
     if model.startswith("claude-"):
         return model
+    elif any(model.startswith(prefix) for prefix in GEMINI_PREFIXES):
+        return f"gemini/{model}"
     elif len(model.split("/")) >= 2:
         return model
     return f"openai/{model}"
@@ -144,6 +147,8 @@ def get_api_key(model: str):
         env_var = "OPENAI_API_KEY"
     elif any(model.startswith(prefix) for prefix in ANTHROPIC_PREFIXES):
         env_var = "ANTHROPIC_API_KEY"
+    elif any(model.startswith(prefix) for prefix in GEMINI_PREFIXES):
+        env_var = "GEMINI_API_KEY"
     else:
         env_var = "LLM_API_KEY"
     api_key = os.getenv(env_var)
