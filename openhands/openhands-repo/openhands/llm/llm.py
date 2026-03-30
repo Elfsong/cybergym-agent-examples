@@ -1,5 +1,7 @@
 import copy
+import json
 import os
+import re
 import time
 import warnings
 from functools import partial
@@ -93,6 +95,81 @@ MODELS_WITHOUT_STOP_WORDS = [
     'o4-mini',
     "o4-mini-2025-04-16",
 ]
+
+# ---------------------------------------------------------------------------
+# Kimi K2/K2.5 native tool call parser
+# ---------------------------------------------------------------------------
+# Kimi models emit tool calls as special tokens in the text response rather
+# than structured tool_calls.  The patterns below mirror the parsing in
+# tinker-cookbook/tinker_cookbook/renderers/kimi_k2.py.
+
+_KIMI_TOOL_SECTION_RE = re.compile(
+    r"<\|tool_calls_section_begin\|>(.*?)<\|tool_calls_section_end\|>"
+    r"|<\|tool_call_section_begin\|>(.*?)<\|tool_call_section_end\|>",
+    re.DOTALL,
+)
+_KIMI_TOOL_CALL_RE = re.compile(
+    r"<\|tool_call_begin\|>\s*([^<]+?)\s*<\|tool_call_argument_begin\|>\s*(.*?)\s*<\|tool_call_end\|>",
+    re.DOTALL,
+)
+_THINK_BLOCK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL)
+
+
+def _parse_kimi_tool_calls(resp: ModelResponse) -> ModelResponse:
+    """Detect Kimi-style tool call tokens in a text response and convert them
+    to proper ``tool_calls`` on the message, so the rest of OpenHands can
+    treat them like any native tool-calling model.
+
+    If no Kimi markers are found the response is returned unchanged.
+    """
+    if not resp.choices or not resp.choices[0].message.content:
+        return resp
+
+    content: str = resp.choices[0].message.content
+    section_match = _KIMI_TOOL_SECTION_RE.search(content)
+    if not section_match:
+        return resp
+
+    tool_section = section_match.group(1) if section_match.group(1) is not None else section_match.group(2)
+    text_before = content[: section_match.start()].strip()
+
+    # Strip <think>…</think> from the visible content (keep text after it)
+    think_match = _THINK_BLOCK_RE.search(text_before)
+    if think_match:
+        text_before = text_before[think_match.end():].strip()
+
+    tool_calls: list[ChatCompletionMessageToolCall] = []
+    for idx, tc_match in enumerate(_KIMI_TOOL_CALL_RE.finditer(tool_section)):
+        tool_id = tc_match.group(1).strip()
+        args_str = tc_match.group(2).strip()
+
+        # Extract function name: "functions.execute_bash:0" → "execute_bash"
+        name_part = tool_id.split(":", 1)[0]
+        if "." in name_part:
+            _, name_part = name_part.split(".", 1)
+
+        # Validate JSON (skip malformed calls)
+        try:
+            json.loads(args_str)
+        except json.JSONDecodeError:
+            logger.warning("Kimi tool call parser: skipping malformed JSON args for %s", name_part)
+            continue
+
+        call_id = f"call_{name_part}_{idx}"
+        tool_calls.append(
+            ChatCompletionMessageToolCall(
+                id=call_id,
+                type="function",
+                function={"name": name_part, "arguments": args_str},
+            )
+        )
+
+    if tool_calls:
+        resp.choices[0].message.content = text_before or None
+        resp.choices[0].message.tool_calls = tool_calls
+        logger.info("Kimi tool call parser: extracted %d tool call(s)", len(tool_calls))
+
+    return resp
 
 
 class LLM(RetryMixin, DebugMixin):
@@ -235,7 +312,12 @@ class LLM(RetryMixin, DebugMixin):
                 kwargs['messages'] = messages
 
                 # add stop words if the model supports it
-                if self.config.model not in MODELS_WITHOUT_STOP_WORDS:
+                # Skip stop words for custom endpoints (vLLM, etc.) which may
+                # not support multi-token stop sequences.
+                if (
+                    self.config.model not in MODELS_WITHOUT_STOP_WORDS
+                    and not self.config.base_url
+                ):
                     kwargs['stop'] = STOP_WORDS
 
                 mock_fncall_tools = kwargs.pop('tools')
@@ -290,6 +372,12 @@ class LLM(RetryMixin, DebugMixin):
             )
             resp: ModelResponse = self._completion_unwrapped(*args, **kwargs)
 
+            # Parse Kimi K2/K2.5 native tool call tokens from text responses.
+            # This must run before any other response processing so that
+            # downstream code sees proper tool_calls on the message.
+            if self.config.base_url:
+                resp = _parse_kimi_tool_calls(resp)
+
             # Calculate and record latency
             latency = time.time() - start_time
             response_id = resp.get('id', 'unknown')
@@ -298,7 +386,12 @@ class LLM(RetryMixin, DebugMixin):
             non_fncall_response = copy.deepcopy(resp)
 
             # if we mocked function calling, and we have tools, convert the response back to function calling format
-            if mock_function_calling and mock_fncall_tools is not None:
+            # Skip if Kimi parser already extracted tool_calls from the response.
+            kimi_parsed = bool(
+                resp.choices
+                and resp.choices[0].message.tool_calls
+            )
+            if mock_function_calling and mock_fncall_tools is not None and not kimi_parsed:
                 if len(resp.choices) < 1:
                     raise LLMNoResponseError(
                         'Response choices is less than 1 - This is only seen in Gemini models so far. Response: '
