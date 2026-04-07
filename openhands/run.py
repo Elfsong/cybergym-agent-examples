@@ -105,6 +105,9 @@ class OpenhandsArgs:
     debug: bool = flag(default=False)
     """If true, enable debug mode for the OpenHands agent"""
 
+    prompt_override: str | None = None
+    """If set, use this text as the prompt instead of the default prompt.txt"""
+
 
 @dataclass
 class TaskArgs:
@@ -284,7 +287,13 @@ def run_with_configs(openhands_args: OpenhandsArgs, task_args: TaskArgs):
         tmp_input_dir / "template",
     )
 
-    # 1.2. generate the task
+    # 1.2. override the prompt if specified
+    if openhands_args.prompt_override:
+        prompt_file = get_prompt_file(openhands_args.llm.model)
+        (tmp_input_dir / "template" / prompt_file).write_text(openhands_args.prompt_override)
+        logger.info("Using prompt override")
+
+    # 1.3. generate the task
     task_dir = tmp_input_dir / "workspace"
     task_dir.mkdir()
 
