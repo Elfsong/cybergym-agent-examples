@@ -213,11 +213,11 @@ def run_openhands(
     debug: bool = False,
     enable_thinking: bool = False,
 ):
-    poetry_path = Path(shutil.which("poetry")).absolute()
-    if not poetry_path.exists():
-        raise Exception(f"[*] Poetry not found at {poetry_path}")
+    venv_python = repo / ".venv" / "bin" / "python"
+    if not venv_python.exists():
+        raise Exception(f"[*] Python not found at {venv_python}")
     cmd = [
-        str(poetry_path), "run", "python",
+        str(venv_python),
         "-m", "openhands.core.main",
         "--config-file", str(config_path),
         "--file", str(prompt_path),
