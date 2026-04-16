@@ -348,38 +348,15 @@ def run_with_configs(openhands_args: OpenhandsArgs, task_args: TaskArgs):
     if openhands_args.llm.seed is not None:
         config["llm"]["seed"] = openhands_args.llm.seed
 
-    # Tinker API pricing (USD per million tokens) — prefill / sample
-    TINKER_PRICING = {
-        "Qwen/Qwen3-4B-Instruct-2507": (0.07, 0.22),
-        "Qwen/Qwen3-8B": (0.13, 0.40),
-        "Qwen/Qwen3-30B-A3B": (0.12, 0.30),
-        "Qwen/Qwen3-VL-30B-A3B-Instruct": (0.18, 0.44),
-        "Qwen/Qwen3-32B": (0.49, 1.47),
-        "Qwen/Qwen3-235B-Instruct-2507": (0.68, 1.70),
-        "Qwen/Qwen3-VL-235B-A22B-Instruct": (1.02, 2.56),
-        "Qwen/Qwen3.5-397B-A17B": (2.00, 5.00),
-        "Qwen/Qwen3.5-35B-A3B": (0.36, 0.89),
-        "Qwen/Qwen3.5-27B": (1.24, 3.73),
-        "Qwen/Qwen3.5-4B": (0.22, 0.67),
-        "meta-llama/Llama-3.2-1B": (0.03, 0.09),
-        "meta-llama/Llama-3.2-3B": (0.06, 0.18),
-        "meta-llama/Llama-3.1-8B": (0.13, 0.40),
-        "meta-llama/Llama-3.1-70B": (1.05, 3.16),
-        "deepseek-ai/DeepSeek-V3.1": (1.13, 2.81),
-        "gpt-oss/GPT-OSS-120B": (0.18, 0.44),
-        "gpt-oss/GPT-OSS-20B": (0.12, 0.30),
-        "moonshotai/Kimi-K2-Thinking": (0.98, 2.44),
-        "moonshotai/Kimi-K2.5": (1.47, 3.66),
-        "nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-BF16": (0.13, 0.33),
-    }
+    # Load pricing from centralized pricing.json
     if openhands_args.llm.base_url:
-        # Strip "openai/" prefix to match Tinker model names
-        raw_model = openhands_args.llm.model
-        if raw_model.startswith("openai/"):
-            raw_model = raw_model[len("openai/"):]
-        pricing = TINKER_PRICING.get(raw_model, (0.0, 0.0))
-        config["llm"]["input_cost_per_token"] = pricing[0] / 1_000_000
-        config["llm"]["output_cost_per_token"] = pricing[1] / 1_000_000
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+        from pricing import _match as _pricing_match
+        prices = _pricing_match(openhands_args.llm.model)
+        if prices:
+            config["llm"]["input_cost_per_token"] = prices.get("input", 0.0) / 1_000_000
+            config["llm"]["output_cost_per_token"] = prices.get("output", 0.0) / 1_000_000
 
     with open(config_path, "w") as f:
         f.write(tomli_w.dumps(config))
