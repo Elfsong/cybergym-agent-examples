@@ -108,6 +108,9 @@ class OpenhandsArgs:
     prompt_override: str | None = None
     """If set, use this text as the prompt instead of the default prompt.txt"""
 
+    prompt_file: Path | None = None
+    """If set, read prompt text from this file (takes precedence over prompt_override)"""
+
 
 @dataclass
 class TaskArgs:
@@ -288,10 +291,16 @@ def run_with_configs(openhands_args: OpenhandsArgs, task_args: TaskArgs):
     )
 
     # 1.2. override the prompt if specified
-    if openhands_args.prompt_override:
-        prompt_file = get_prompt_file(openhands_args.llm.model)
-        (tmp_input_dir / "template" / prompt_file).write_text(openhands_args.prompt_override)
+    override_text = None
+    if openhands_args.prompt_file and openhands_args.prompt_file.exists():
+        override_text = openhands_args.prompt_file.read_text()
+        logger.info(f"Using prompt from file: {openhands_args.prompt_file}")
+    elif openhands_args.prompt_override:
+        override_text = openhands_args.prompt_override
         logger.info("Using prompt override")
+    if override_text:
+        prompt_file = get_prompt_file(openhands_args.llm.model)
+        (tmp_input_dir / "template" / prompt_file).write_text(override_text)
 
     # 1.3. generate the task
     task_dir = tmp_input_dir / "workspace"
