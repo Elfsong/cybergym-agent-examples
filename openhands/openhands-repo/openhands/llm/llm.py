@@ -363,6 +363,14 @@ class LLM(RetryMixin, DebugMixin):
                 if os.getenv("CYBERGYM_ENABLE_THINKING"):
                     kwargs["top_p"] = None
                     kwargs["thinking"] = {"type": "enabled", "budget_tokens": 2048}
+            elif "qwen3.5" in self.config.model.lower() or "qwen3.6" in self.config.model.lower():
+                # Qwen3.5/3.6 default reasoning ON. Explicit opt-out keeps output
+                # tokens comparable to the thinking-OFF baseline. For vLLM, the
+                # toggle lives inside the chat template; the correct payload is
+                # chat_template_kwargs.enable_thinking=False (NOT a top-level
+                # enable_thinking field — that is silently ignored).
+                if not os.getenv("CYBERGYM_ENABLE_THINKING"):
+                    kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
 
             # Record start time for latency measurement
             start_time = time.time()
