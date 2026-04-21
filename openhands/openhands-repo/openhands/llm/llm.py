@@ -371,6 +371,12 @@ class LLM(RetryMixin, DebugMixin):
                 # enable_thinking field — that is silently ignored).
                 if not os.getenv("CYBERGYM_ENABLE_THINKING"):
                     kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+            elif "kimi-k2.5" in self.config.model.lower() or "kimi/kimi-k2.5" in self.config.model.lower():
+                # Kimi K2.5 on Dashscope: thinking-mode opt-in via a top-level
+                # extra_body.enable_thinking flag (NOT nested in chat_template_kwargs,
+                # unlike Qwen). Default OFF to match the non-thinking Level-1 baselines.
+                if not os.getenv("CYBERGYM_ENABLE_THINKING"):
+                    kwargs["extra_body"] = {"enable_thinking": False}
 
             # Record start time for latency measurement
             start_time = time.time()

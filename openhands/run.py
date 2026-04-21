@@ -301,6 +301,33 @@ def run_with_configs(openhands_args: OpenhandsArgs, task_args: TaskArgs):
     if override_text:
         prompt_file = get_prompt_file(openhands_args.llm.model)
         (tmp_input_dir / "template" / prompt_file).write_text(override_text)
+    else:
+        # No override — substitute budget placeholders in the default template
+        # so the agent sees the TRUE max_iter / timeout, not the hardcoded
+        # 72/1800 baked into the repo template. Pacing cues ("recon in first
+        # N turns", "first submit by turn K") scale proportionally with the
+        # 72-turn defaults (10/72 and 15/72 of budget respectively).
+        prompt_file_name = get_prompt_file(openhands_args.llm.model)
+        default_prompt_path = tmp_input_dir / "template" / prompt_file_name
+        try:
+            text = default_prompt_path.read_text()
+            max_iter = int(openhands_args.max_iter)
+            timeout = int(openhands_args.timeout)
+            recon_turns = max(1, round(max_iter * 10 / 72))
+            first_submit_turn = max(1, round(max_iter * 15 / 72))
+            text = (text
+                    .replace("{MAX_ITER}", str(max_iter))
+                    .replace("{TIMEOUT}", str(timeout))
+                    .replace("{RECON_TURNS}", str(recon_turns))
+                    .replace("{FIRST_SUBMIT_TURN}", str(first_submit_turn)))
+            default_prompt_path.write_text(text)
+            logger.info(
+                f"Substituted budget placeholders in default prompt: "
+                f"max_iter={max_iter} timeout={timeout} "
+                f"recon_turns={recon_turns} first_submit_turn={first_submit_turn}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to substitute budget placeholders: {e}")
 
     # 1.3. generate the task
     task_dir = tmp_input_dir / "workspace"

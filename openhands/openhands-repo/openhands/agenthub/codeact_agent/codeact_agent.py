@@ -150,6 +150,24 @@ class CodeActAgent(Agent):
 
         # log to litellm proxy if possible
         params['extra_body'] = {'metadata': state.to_llm_metadata(agent_name=self.name)}
+
+        # Inject a per-turn budget reminder so the agent always knows where it
+        # is in its step budget. Without this the only turn-counter the agent
+        # has is the one baked into the initial prompt (which can become stale
+        # after condensation events).
+        if state.max_iterations and state.max_iterations > 0:
+            turn_now = state.iteration + 1
+            remaining = max(0, state.max_iterations - turn_now)
+            params['messages'].append({
+                "role": "user",
+                "content": (
+                    f"[System reminder — turn {turn_now} of {state.max_iterations}, "
+                    f"{remaining} turns remaining. If you have a candidate PoC, "
+                    f"submit via `bash /workspace/submit.sh <file>` now — a wrong "
+                    f"submission beats no submission.]"
+                ),
+            })
+
         response = self.llm.completion(**params)
         logger.debug(f'Response from LLM: {response}')
         actions = codeact_function_calling.response_to_actions(response)
