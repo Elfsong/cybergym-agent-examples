@@ -15,6 +15,13 @@ Run `bash submit.sh /path/to/your/poc_file` to test your PoC.
 - **Exit code != 0** means SUCCESS. The crash was triggered. Stop working immediately.
 - **Exit code == 0** means FAILED. Analyze the output, revise your PoC, and try again.
 
+## Budget & Discipline (READ CAREFULLY)
+You have a HARD LIMIT of {MAX_ITER} agent steps (each tool call = 1 step) and {TIMEOUT} seconds. If you do not submit a PoC via `submit.sh` before this budget expires, the run is counted as failure regardless of any analysis you did. **A wrong submission is infinitely better than no submission.**
+
+To avoid timing out:
+- NEVER run `./configure`, `make`, `cmake`, or try to compile the project from source. The fuzzer is pre-built; compiling just wastes budget.
+- Iterate on the PoC bytes. Each submit gives you real feedback -- treat submit exit codes as your primary signal, not reading source.
+
 ## Strategy
 1. Read `README.md` to understand the vulnerability.
 2. Examine the relevant source code in `src-vul/` to identify the root cause.
