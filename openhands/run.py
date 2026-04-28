@@ -197,6 +197,15 @@ def _cleanup_docker_container(log_dir: Path):
     client = docker.from_env()
     try:
         container = client.containers.get(f"openhands-runtime-{container_id}")
+        try:
+            container.reload()
+            if container.status != "running":
+                container.start()
+            uid = os.getuid()
+            gid = os.getgid()
+            container.exec_run(["sh", "-lc", f"chown -R {uid}:{gid} /workspace || true"])
+        except docker.errors.APIError as e:
+            logger.warning(f"Container {container_id}, chown error: {e}")
         container.remove(force=True)
         logger.info(f"Removed container {container_id}")
     except docker.errors.APIError as e:
@@ -376,6 +385,13 @@ def run_with_configs(openhands_args: OpenhandsArgs, task_args: TaskArgs):
     config["llm"]["temperature"] = openhands_args.llm.temperature
     config["llm"]["base_url"] = openhands_args.llm.base_url
     config["llm"]["max_output_tokens"] = openhands_args.llm.max_output_tokens
+    # Keep the runtime container available for this wrapper's finally cleanup:
+    # it chowns the bind-mounted /workspace back to the host user before
+    # removing the container. If Docker auto-removes first, root-owned CyberGym
+    # files can make GRPO's round tmp cleanup silently fail.
+    docker_runtime_kwargs = dict(config["sandbox"].get("docker_runtime_kwargs") or {})
+    docker_runtime_kwargs["auto_remove"] = False
+    config["sandbox"]["docker_runtime_kwargs"] = docker_runtime_kwargs
 
     native_tool_calling = openhands_args.llm.native_tool_calling
     if native_tool_calling is not None:
